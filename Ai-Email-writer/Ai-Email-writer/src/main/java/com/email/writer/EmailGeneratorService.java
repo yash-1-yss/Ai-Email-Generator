@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import reactor.util.retry.Retry;
+import java.time.Duration;
 
 @Service
 public class EmailGeneratorService {
@@ -21,6 +23,7 @@ public class EmailGeneratorService {
     }
 
     public String generateEmailReply(EmailRequest emailRequest) {
+        long startTime = System.currentTimeMillis();
         //build prompt
         String prompt=buildPrompt(emailRequest);
         //prepare raw json body
@@ -37,17 +40,21 @@ public class EmailGeneratorService {
                     ]
                   }""",prompt);
         //send request
-        String response=webClient.post().
-                uri(uriBuilder -> uriBuilder.path("/v1beta/models/gemini-3.5-flash:generateContent")
-                        .build())
-                .header("x-goog-api-key",apiKey)
-                .header("Content-Type","application/json")
+        String response = webClient.post()
+                .uri(uriBuilder -> uriBuilder.path("/v1beta/models/gemini-3.5-flash:generateContent").build())
+                .header("x-goog-api-key", apiKey)
+                .header("Content-Type", "application/json")
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(String.class)
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(2))) // Automatically retries up to 3 times with a 2-second delay
                 .block();
 
+        long endTime = System.currentTimeMillis();
 
+        System.out.println(
+                "Generation Time: " + (endTime - startTime) + " ms"
+        );
         //extract response
         return extractResponseContent(response);
 
@@ -76,7 +83,8 @@ public class EmailGeneratorService {
         if(emailRequest.getTone()!=null && !emailRequest.getTone().isEmpty()){
             prompt.append("Use a").append(emailRequest.getTone()).append("tone");
         }
-        prompt.append("Orignal email:").append(emailRequest.getEmailContent());
+        prompt.append("Orignal email:").append(emailRequest.getEmailContent())
+                .append("Only 1 response with any name ");
         return prompt.toString();
     }
 }
